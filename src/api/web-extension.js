@@ -80,6 +80,9 @@ export default {
     this._connectionPort =
       browser.runtime.connect({name: "ion-options-page"});
 
+    this._connectionPort.onMessage.addListener(
+      m => this._handleMessage(m));
+
     // The onDisconnect event is fired if there's no receiving
     // end or in case of any other error. Log an error and clear
     // the port in that case.
@@ -97,7 +100,7 @@ export default {
   // stored somewhere (i.e. remote settings)
   async getAvailableStudies() {
     let response =
-      waitForCoreResponse(this._connectionPort, "get-studies-response");
+      waitForCoreResponse(this._connectionPort, "update-state");
 
     await sendToCore(this._connectionPort, "get-studies", {});
     return await response;
@@ -139,15 +142,6 @@ export default {
    */
 
   async updateStudyEnrollment(studyID, enroll) {
-    if (!enroll) {
-      return await sendToCore(
-        this._connectionPort, "study-unenrollment", { studyID }
-      ).then(r => true);
-    }
-
-    await sendToCore(
-      this._connectionPort, "study-enrollment", { studyID });
-
     // Fetch the study add-on and attempt to install it.
     const studies = await this.getAvailableStudies();
     const studyMetadata = studies.find(s => s.addon_id === studyID);
@@ -174,4 +168,28 @@ export default {
 
     return true;
   },
+
+  /**
+   * Handle messages coming from the background script.
+   *
+   * @param {Object} message
+   *        The incoming message, with the following structure:
+   * ```js
+   * {
+   *  type: "message-type",
+   *  data: { ... },
+   * }
+   * ```
+   */
+  async _handleMessage(message) {
+    switch (message.type) {
+      case "update-state": {
+        // TODO: Update the UI accordingly.
+        console.log('Received new studyes! ' + message.data);
+      } break;
+      default:
+        return Promise.reject(
+          new Error(`Ion - unexpected message type ${message.type}`));
+    }
+  }
 };
