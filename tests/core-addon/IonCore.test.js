@@ -186,10 +186,8 @@ describe('IonCore', function () {
       browser.storage.local.get.callsArgWith(1, {}).resolves();
       chrome.storage.local.get.yields({});
 
-      // Provide a valid study enrollment message.
-      await this.ionCore._handleMessage(
-        {type: "study-enrollment", data: { studyID: FAKE_STUDY_ID}}
-      );
+      // Attempt to enroll to a study.
+      await this.ionCore._enrollStudy(FAKE_STUDY_ID);
 
       // We expect to store the fake ion ID.
       telemetryMock.expects("setIonID").withArgs([FAKE_UUID]).calledOnce;
@@ -279,10 +277,8 @@ describe('IonCore', function () {
       chrome.storage.local.get.yields({});
       chrome.runtime.sendMessage.yields();
 
-      // Provide a valid study unenrollment message.
-      await this.ionCore._handleMessage(
-        {type: "study-unenrollment", data: { studyID: FAKE_STUDY_ID}}
-      );
+      // Unenroll from a study.
+      await this.ionCore._unenrollStudy(FAKE_STUDY_ID);
 
       // We expect to store the fake ion ID...
       telemetryMock.expects("setIonID").withArgs([FAKE_UUID]).calledOnce;

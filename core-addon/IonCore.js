@@ -31,6 +31,8 @@ module.exports = class IonCore {
 
     // Asynchronously get the available studies. We don't need to wait
     // for this to finish, the UI can handle the wait.
+    // TODO: we don't really need "runUpdateINstall..." anymore, because
+    // we're synching up with the addon install/uninstall events.
     this._availableStudies =
       this._fetchAvailableStudies()
           .then(studies => this.runUpdateInstalledStudiesTask(studies));
@@ -56,14 +58,10 @@ module.exports = class IonCore {
 
     // Listen for addon install/uninstall and keep the studies
     // installation state up to date.
-    let addonStateHandler = async () => {
-      let studies = await this._availableStudies;
-      // Update the studies list.
-      this._availableStudies = this._availableStudies.then(
-        studies => this.runUpdateInstalledStudiesTask(studies));
-    };
-    browser.management.onInstalled.addListener(addonStateHandler);
-    browser.management.onUninstalled.addListener(addonStateHandler);
+    browser.management.onInstalled.addListener(
+      info => this._handleAddonLifecycle(info, true));
+    browser.management.onUninstalled.addListener(
+      info => this._handleAddonLifecycle(info, false));
 
     // Listen for incoming messages from the studies.
     //
@@ -90,6 +88,46 @@ module.exports = class IonCore {
     browser.runtime.openOptionsPage().catch(e => {
       console.error(`IonCore.js - Unable to open the control panel`, e);
     });
+  }
+
+  /**
+   * React to studies installation and uninstallation.
+   *
+   * @param {ExtensionInfo} info
+   *        The information about the addon that triggered the event.
+   * @param {Boolean} installed
+   *        `true` if the addon was installed, `false` otherwise.
+   * @returns {Promise} resolved when the new state is completely
+   *          handled.
+   */
+  async _handleAddonLifecycle(info, installed) {
+    // Don't do anything if we received an updated from an addon
+    // that's not an Ion study.
+    let knownStudies = await this._availableStudies;
+    if (!knownStudies.map(s => s.addon_id).includes(info.id)) {
+      console.debug(
+        `IonCore._handleAddonLifecycle - non-study addon ${info.id} was ${installed ? "installed" : "uninstalled"}`
+      );
+      return;
+    }
+
+    // Update the available studies list with the installation
+    // information.
+    this._availableStudies = Promise.resolve(knownStudies.map(s => {
+        if (s.addon_id == info.id) {
+          s.ionInstalled = installed;
+        }
+        return s;
+      })
+    );
+
+    if (installed) {
+      await this._enrollStudy(info.id);
+    } else {
+      await this._unenrollStudy(info.id);
+    }
+
+    await this._sendStateUpdateToUI();
   }
 
   /**
@@ -138,17 +176,7 @@ module.exports = class IonCore {
         return this._enroll();
       } break;
       case "get-studies": {
-        this._availableStudies.then(studies => {
-          this._connectionPort.postMessage(
-            {type: "get-studies-response", data: studies});
-        });
-        return Promise.resolve();
-      } break;
-      case "study-enrollment": {
-        return this._enrollStudy(message.data.studyID);
-      } break;
-      case "study-unenrollment": {
-        return this._unenrollStudy(message.data.studyID);
+        return this._sendStateUpdateToUI();
       } break;
       case "unenrollment": {
         return this._unenroll();
@@ -432,5 +460,58 @@ module.exports = class IonCore {
       console.error(err);
       return [];
     }
+  }
+
+  /**
+   * Send a message with the latest state to the UI.
+   *
+   * The state has the following format:
+   *
+   * ```js
+   * {
+   *  // The enrollment as a Boolean indicating if user joined
+   *  // the platform.
+   *  enrolled: true,
+   *  // An array with a list of studies, fetched from our servers,
+   *  // and integrated with the install status.
+   *  availableStudies: [
+   *    {
+   *      name: "Demo Study",
+   *      icons: { ... },
+   *      schema: ...,
+   *      authors { ... },
+   *      version: "1.0",
+   *      addon_id: "demo-study@ion.org",
+   *      moreInfo: { ... },
+   *      isDefault: false,
+   *      sourceURI: { ... },
+   *      studyType: "extension",
+   *      studyEnded: false,
+   *      description: "Some nice description",
+   *      privacyPolicy: { ... },
+   *      joinStudyConsent: "...",
+   *      leaveStudyConsent: "...",
+   *      dataCollectionDetails: [ ... ],
+   *      id:"...",
+   *      last_modified: ...,
+   *      // Whether or not the study is currently installed.
+   *      ionInstalled: false
+   *    },
+   *  ]
+   * }
+   * ```
+   */
+  async _sendStateUpdateToUI() {
+    let isEnrolled = !!(await this._storage.getIonID());
+    let knownStudies = await this._availableStudies;
+
+    const newState = {
+      enrolled: isEnrolled,
+      availableStudies: knownStudies
+    };
+
+    // Send a message to the UI to update the list of studies.
+    this._connectionPort.postMessage(
+      {type: "update-state", data: newState});
   }
 }
