@@ -242,8 +242,11 @@ module.exports = class IonCore {
     // we need set the value of that required pref.
     await browser.firefoxPrivilegedApi.setIonID(uuid);
 
-    // Finally send the ping.
+    // Send the ping.
     await this._dataCollection.sendEnrollmentPing();
+
+    // Update the frontend.
+    await this._sendStateUpdateToUI();
   }
 
   /**
@@ -267,6 +270,9 @@ module.exports = class IonCore {
 
     // Finally send the ping.
     await this._dataCollection.sendEnrollmentPing(studyAddonId);
+
+    // Update the frontend.
+    await this._sendStateUpdateToUI();
   }
 
   /**
@@ -343,6 +349,9 @@ module.exports = class IonCore {
 
     // Finally clear the list of studies user took part in.
     await this._storage.clearActivatedStudies();
+
+    // Update the frontend.
+    await this._sendStateUpdateToUI();
   }
 
   /**
@@ -466,12 +475,14 @@ module.exports = class IonCore {
    * ```
    */
   async _sendStateUpdateToUI() {
-    let isEnrolled = !!(await this._storage.getIonID());
-    let knownStudies = await this._availableStudies;
+    let enrolled = !!(await this._storage.getIonID());
+    let availableStudies = await this._availableStudies;
+    let activeStudies = await this._storage.getActivatedStudies();
 
     const newState = {
-      enrolled: isEnrolled,
-      availableStudies: knownStudies
+      enrolled,
+      availableStudies,
+      activeStudies,
     };
 
     // Send a message to the UI to update the list of studies.
